@@ -1,0 +1,252 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+.page { padding: 1.5rem 0; }
+
+.top-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+.top-bar h1 { font-size: 18px; font-weight: 500; color: var(--color-text-primary); display: flex; align-items: center; gap: 8px; }
+.date-pill {
+  background: var(--color-background-secondary);
+  border: 0.5px solid var(--color-border-secondary);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+}
+.date-pill:hover { border-color: var(--color-border-primary); color: var(--color-text-primary); }
+
+.region-tabs {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+}
+.rtab {
+  padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer;
+  border: 0.5px solid var(--color-border-tertiary);
+  background: var(--color-background-primary);
+  color: var(--color-text-secondary);
+  transition: all 0.15s;
+}
+.rtab:hover { border-color: var(--color-border-secondary); color: var(--color-text-primary); }
+.rtab.active {
+  background: #185FA5; color: #E6F1FB;
+  border-color: #185FA5;
+  font-weight: 500;
+}
+.rtab .dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #5DCAA5; margin-right: 4px; vertical-align: middle;
+}
+
+.court-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.court-card {
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-lg);
+  overflow: hidden;
+}
+.court-card:hover { border-color: var(--color-border-secondary); }
+
+.court-header {
+  padding: 12px 16px 10px;
+  border-bottom: 0.5px solid var(--color-border-tertiary);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.court-name { font-size: 14px; font-weight: 500; color: var(--color-text-primary); }
+.region-badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: #E6F1FB; color: #0C447C;
+}
+
+.slot-grid {
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.slot {
+  padding: 6px 4px; border-radius: 6px; text-align: center;
+  font-size: 11px; cursor: pointer; border: 0.5px solid transparent;
+  transition: all 0.12s;
+  line-height: 1.3;
+}
+.slot-time { font-weight: 500; display: block; }
+
+.slot.open {
+  background: #EAF3DE; color: #3B6D11;
+  border-color: #C0DD97;
+}
+.slot.open:hover { background: #C0DD97; transform: scale(1.03); }
+
+.slot.booked {
+  background: var(--color-background-secondary);
+  color: var(--color-text-tertiary);
+  cursor: default;
+}
+
+.legend {
+  display: flex; gap: 16px; align-items: center;
+  margin-bottom: 1rem;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px; font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+.avail-count { font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px; }
+
+.empty-msg {
+  grid-column: 1/-1; text-align: center;
+  padding: 2rem; color: var(--color-text-tertiary); font-size: 14px;
+}
+
+.toast {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: #185FA5; color: #E6F1FB;
+  padding: 8px 20px; border-radius: 20px; font-size: 13px;
+  display: none; z-index: 999;
+}
+</style>
+
+<div class="page">
+  <h2 class="sr-only">시립 테니스장 예약 현황 — 지역별 코트와 타임슬롯을 한눈에 확인합니다.</h2>
+
+  <div class="top-bar">
+    <h1>🎾 테니스장 예약 현황</h1>
+    <div class="date-pill" onclick="cycleDate()">
+      <span>📅</span>
+      <span id="dateLabel">2026-05-05 (화)</span>
+    </div>
+  </div>
+
+  <div class="region-tabs" id="regionTabs"></div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:#C0DD97; border: 0.5px solid #97C459;"></div> 예약 가능
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--color-background-secondary); border: 0.5px solid var(--color-border-tertiary);"></div> 예약 완료
+    </div>
+  </div>
+
+  <div class="court-grid" id="courtGrid"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const regions = ["전체", "강서구", "마포구", "고양시", "용인시", "김포시", "성동구", "송파구", "노원구"];
+const courts = [
+  { id:1, name:"우장산테니스장", region:"강서구", url:"https://yeyak.seoul.go.kr" },
+  { id:2, name:"망원테니스장", region:"마포구", url:"https://yeyak.seoul.go.kr" },
+  { id:3, name:"성저테니스장", region:"고양시", url:"https://goyangsi.go.kr/reservation" },
+  { id:4, name:"시립테니스장", region:"용인시", url:"https://yongin.go.kr/reservation" },
+  { id:5, name:"걸포중앙공원", region:"김포시", url:"https://gimpo.go.kr/reservation" },
+  { id:6, name:"응봉테니스장", region:"성동구", url:"https://yeyak.seoul.go.kr" },
+  { id:7, name:"올림픽공원코트", region:"송파구", url:"https://yeyak.seoul.go.kr" },
+  { id:8, name:"태릉테니스장", region:"노원구", url:"https://yeyak.seoul.go.kr" },
+];
+
+const slots = ["06:00~08:00","08:00~10:00","10:00~12:00","12:00~14:00","14:00~16:00","16:00~18:00","18:00~20:00","20:00~22:00"];
+
+function makeSlotData(courtId, dateIdx) {
+  return slots.map((s, i) => {
+    const r = (courtId * 7 + i * 3 + dateIdx * 11) % 10;
+    return r < 5 ? "open" : "booked";
+  });
+}
+
+let activeRegion = "전체";
+const dates = ["2026-05-05 (화)","2026-05-06 (수)","2026-05-07 (목)"];
+let dateIdx = 0;
+
+function cycleDate() {
+  dateIdx = (dateIdx + 1) % dates.length;
+  document.getElementById("dateLabel").textContent = dates[dateIdx];
+  renderCourts();
+}
+
+function renderTabs() {
+  const tabs = document.getElementById("regionTabs");
+  tabs.innerHTML = regions.map(r => {
+    const relevant = courts.filter(c => r === "전체" || c.region === r);
+    const hasFree = relevant.some(c => makeSlotData(c.id, dateIdx).includes("open"));
+    const isActive = r === activeRegion;
+    return `<div class="rtab ${isActive ? "active" : ""}" onclick="setRegion('${r}')">
+      ${hasFree && !isActive ? '<span class="dot"></span>' : ""}${r}
+    </div>`;
+  }).join("");
+}
+
+function setRegion(r) {
+  activeRegion = r;
+  renderTabs();
+  renderCourts();
+}
+
+function renderCourts() {
+  const grid = document.getElementById("courtGrid");
+  const filtered = courts.filter(c => activeRegion === "전체" || c.region === activeRegion);
+
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="empty-msg">해당 지역 코트가 없습니다.</div>';
+    return;
+  }
+
+  grid.innerHTML = filtered.map(court => {
+    const slotData = makeSlotData(court.id, dateIdx);
+    const openCount = slotData.filter(s => s === "open").length;
+
+    const slotHtml = slots.map((s, i) => {
+      const st = slotData[i];
+      const startTime = s.split("~")[0];
+      if (st === "booked") {
+        return `<div class="slot booked"><span class="slot-time">${startTime}</span><span>마감</span></div>`;
+      }
+      return `<div class="slot open" onclick="goBook('${court.url}', '${court.name}', '${s}')">
+        <span class="slot-time">${startTime}</span><span>가능</span>
+      </div>`;
+    }).join("");
+
+    return `<div class="court-card">
+      <div class="court-header">
+        <div>
+          <div class="court-name">${court.name}</div>
+          <div class="avail-count">${openCount}개 슬롯 가능</div>
+        </div>
+        <span class="region-badge">${court.region}</span>
+      </div>
+      <div class="slot-grid">${slotHtml}</div>
+    </div>`;
+  }).join("");
+}
+
+function goBook(url, name, slot) {
+  showToast(`${name} ${slot} 예약 페이지로 이동합니다`);
+  setTimeout(() => { window.open(url, "_blank"); }, 800);
+}
+
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  setTimeout(() => { t.style.display = "none"; }, 2500);
+}
+
+renderTabs();
+renderCourts();
+</script>
