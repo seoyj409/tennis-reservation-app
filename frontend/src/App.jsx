@@ -10,7 +10,7 @@ const STANDARD_SLOTS = [
   "14:00~16:00", "16:00~18:00", "18:00~20:00", "20:00~22:00"
 ];
 
-const REGIONS = ["강서구", "마포구", "고양시", "용인시", "김포시"];
+const REGIONS = ["고양시"];
 
 // 날짜 유틸리티
 const getFormattedDate = (daysAdd = 0) => {
@@ -32,9 +32,9 @@ function App() {
   const [loading, setLoading] = useState(true);
   
   // States
-  const [activeTab, setActiveTab] = useState('전체');
   const [dates, setDates] = useState([getFormattedDate(0), getFormattedDate(1), getFormattedDate(2)]);
   const [activeDate, setActiveDate] = useState(dates[0].value);
+  const [lastSyncTime, setLastSyncTime] = useState(null);
   
   // Favorites
   const [favorites, setFavorites] = useState(() => {
@@ -44,6 +44,9 @@ function App() {
   
   // Toast
   const [toastMsg, setToastMsg] = useState(null);
+
+  // Modal
+  const [selectedSlot, setSelectedSlot] = useState(null); // { court, date, time, subCourts }
 
   const fetchData = async () => {
     setLoading(true);
@@ -59,21 +62,24 @@ function App() {
         .eq('status', 'AVAILABLE');
       if (rError) throw rError;
 
-      // 데이터 병합
+      // 데이터 병합 (코트 -> 날짜 -> 시간 -> 세부 코트 리스트)
       const merged = courtsData.map(c => {
         const courtReservations = reservations.filter(r => r.court_id === c.id);
         
-        // 날짜별로 슬롯 정리
         const slotsByDate = {};
         courtReservations.forEach(r => {
-          if (!slotsByDate[r.date]) slotsByDate[r.date] = [];
-          slotsByDate[r.date].push(r.time_slot);
+          if (!slotsByDate[r.date]) slotsByDate[r.date] = {};
+          if (!slotsByDate[r.date][r.time_slot]) slotsByDate[r.date][r.time_slot] = [];
+          slotsByDate[r.date][r.time_slot].push(r.sub_court_name);
         });
 
         return { ...c, slotsByDate };
       });
 
       setCourts(merged);
+      
+      const now = new Date();
+      setLastSyncTime(now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
     } catch (err) {
       console.error('Error fetching data:', err);
       showToast('데이터를 불러오는 중 오류가 발생했습니다.');
@@ -102,21 +108,34 @@ function App() {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  const handleSlotClick = (url, courtName, slotTime) => {
-    showToast(`${courtName} ${slotTime} 예약 페이지로 이동합니다`);
-    setTimeout(() => { window.open(url || 'about:blank', '_blank'); }, 800);
+  const handleSlotClick = (court, slotTime) => {
+    const subCourts = (court.slotsByDate[activeDate] && court.slotsByDate[activeDate][slotTime]) || [];
+    if (subCourts.length > 0) {
+      setSelectedSlot({
+        court,
+        date: activeDate,
+        time: slotTime,
+        subCourts
+      });
+    }
+  };
+
+  const handleBookingRedirect = (court) => {
+    let url = "";
+    if (court.booking_url_id === 'goyang_city') {
+      url = "https://www.goyang.go.kr/resve/index.do";
+    } else {
+      url = `https://www.gytennis.or.kr/daily/${court.booking_url_id}/${activeDate}`;
+    }
+    window.open(url, '_blank');
   };
 
   // 렌더링용 필터링 데이터
   const filteredCourts = useMemo(() => {
-    let result = courts;
-    if (activeTab === '즐겨찾기') {
-      result = courts.filter(c => favorites.includes(c.id));
-    } else if (activeTab !== '전체') {
-      result = courts.filter(c => c.region === activeTab);
-    }
-    return result;
-  }, [courts, activeTab, favorites]);
+    // 고양시 전체 코트를 보여주되 즐겨찾기를 위로 올리거나 그대로 둡니다.
+    // 여기서는 기본 전체 노출을 유지합니다.
+    return courts;
+  }, [courts]);
 
   // 해당 지역 탭에 초록점(예약가능)이 있는지 판별
   const hasOpenSlot = (region) => {
@@ -125,8 +144,8 @@ function App() {
     else if (region !== '전체') targetCourts = courts.filter(c => c.region === region);
 
     return targetCourts.some(c => {
-      const openSlots = c.slotsByDate[activeDate] || [];
-      return openSlots.length > 0;
+      const dateSlots = c.slotsByDate[activeDate] || {};
+      return Object.keys(dateSlots).length > 0;
     });
   };
 
@@ -158,31 +177,13 @@ function App() {
               }}
             />
           </div>
-          <button className="btn-refresh" onClick={fetchData} disabled={loading}>
-            {loading ? <div className="spinner"></div> : '🔄'} 갱신
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+            <button className="btn-refresh" onClick={fetchData} disabled={loading}>
+              {loading ? <div className="spinner"></div> : '🔄'} 갱신
+            </button>
+            {lastSyncTime && <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>마지막 동기화: {lastSyncTime}</div>}
+          </div>
         </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="region-tabs">
-        {['즐겨찾기', '전체', ...REGIONS].map(r => {
-          const isActive = activeTab === r;
-          const showDot = hasOpenSlot(r);
-          const isFavTab = r === '즐겨찾기';
-          
-          return (
-            <div 
-              key={r} 
-              className={`rtab ${isActive ? 'active' : ''} ${isFavTab ? 'favorite-tab' : ''}`}
-              onClick={() => setActiveTab(r)}
-            >
-              {isFavTab && <span>★</span>}
-              {!isActive && showDot && <span className="dot"></span>}
-              {r}
-            </div>
-          );
-        })}
       </div>
 
       {/* Legend */}
@@ -207,8 +208,9 @@ function App() {
             <div className="empty-msg">해당 조건에 맞는 코트가 없습니다.</div>
           ) : (
             filteredCourts.map(court => {
-              const openSlots = court.slotsByDate[activeDate] || [];
+              const dateSlots = court.slotsByDate[activeDate] || {};
               const isFav = favorites.includes(court.id);
+              const availableSlotCount = Object.keys(dateSlots).length;
               
               return (
                 <div key={court.id} className="court-card">
@@ -220,8 +222,8 @@ function App() {
                           {isFav ? '★' : '☆'}
                         </button>
                       </div>
-                      <div className={`avail-count ${openSlots.length > 0 ? 'has-slots' : ''}`}>
-                        {openSlots.length}개 슬롯 가능
+                      <div className={`avail-count ${availableSlotCount > 0 ? 'has-slots' : ''}`}>
+                        {availableSlotCount}개 타임 가능
                       </div>
                     </div>
                     <span className="region-badge">{court.region}</span>
@@ -229,8 +231,8 @@ function App() {
 
                   <div className="slot-grid">
                     {STANDARD_SLOTS.map(slotTime => {
-                      // 실제 예약가능 시간대에 포함되는지 확인 (더미데이터는 완전 일치하지 않을 수 있으므로 contains 검사)
-                      const isOpen = openSlots.some(os => os.includes(slotTime) || slotTime.includes(os));
+                      const subCourts = dateSlots[slotTime] || [];
+                      const isOpen = subCourts.length > 0;
                       const startTime = slotTime.split('~')[0];
 
                       if (isOpen) {
@@ -238,10 +240,10 @@ function App() {
                           <div 
                             key={slotTime} 
                             className="slot open"
-                            onClick={() => handleSlotClick(court.url, court.name, slotTime)}
+                            onClick={() => handleSlotClick(court, slotTime)}
                           >
                             <span className="slot-time">{startTime}</span>
-                            <span>가능</span>
+                            <span>{subCourts.length}개 코트</span>
                           </div>
                         );
                       } else {
@@ -258,6 +260,32 @@ function App() {
               );
             })
           )}
+        </div>
+      )}
+
+      {/* Modal */}
+      {selectedSlot && (
+        <div className="modal-overlay" onClick={() => setSelectedSlot(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{selectedSlot.court.name} 상세 현황</h2>
+              <button className="close-btn" onClick={() => setSelectedSlot(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <p className="modal-info">{selectedSlot.date} | {selectedSlot.time}</p>
+              <div className="sub-court-list">
+                {selectedSlot.subCourts.sort().map(sc => (
+                  <div key={sc} className="sub-court-item">
+                    <span className="sc-name">{sc}</span>
+                    <span className="sc-status available">예약 가능</span>
+                    <button className="booking-btn" onClick={() => handleBookingRedirect(selectedSlot.court)}>
+                      예약하기
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

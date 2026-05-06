@@ -26,6 +26,9 @@ const STANDARD_SLOTS = [
   "14:00~16:00", "16:00~18:00", "18:00~20:00", "20:00~22:00"
 ];
 
+// 고양시 테니스협회 사이트 ID 매핑 (DB의 booking_url_id 기반으로 작동하도록 수정 예정)
+// 현재는 DB에서 직접 가져오므로 이 매핑 변수는 참고용으로만 사용하거나 제거 가능합니다.
+
 // --- 1. 서울시 공공서비스예약 파싱 (마포구, 강서구 등) ---
 async function scrapeSeoulYeyak(court) {
   const results = [];
@@ -77,7 +80,59 @@ async function scrapeSeoulYeyak(court) {
   return results;
 }
 
-// --- 2. 기타 지자체 파싱 (고양시, 용인시, 김포시) ---
+// --- 2. 고양시 테니스협회 실시간 파싱 ---
+async function scrapeGoyang(court) {
+  const siteId = court.booking_url_id;
+  if (!siteId || siteId === 'goyang_city') {
+    return []; // 시청 예약 사이트(성저, 백석)는 별도 구현 필요 시 추가
+  }
+
+  const results = [];
+  console.log(`[실시간 크롤링] 고양시 - ${court.name} (ID: ${siteId})`);
+
+  for (let daysAdd = 0; daysAdd < 3; daysAdd++) {
+    const date = getFormattedDate(daysAdd);
+    const url = `https://www.gytennis.or.kr/daily/${siteId}/${date}`;
+    
+    try {
+      const response = await axios.get(url, { timeout: 10000 });
+      
+      // 야간 예약 불가 시간대 처리
+      if (response.data.includes('예약 가능한 시간이 아닙니다')) {
+        console.log(`[시스템 점검/마감시간] ${court.name} - 예약 불가 시간 (22:00 ~ 05:00). 기존 예약 정보를 유지합니다.`);
+        return null; // null 반환 시 기존 데이터 보존
+      }
+      
+      const $ = cheerio.load(response.data);
+      
+      // 각 코트(열)별 데이터를 확인하여 상세 코트별로 저장
+      $('.wholeTable .innerCustom').each((courtIdx, courtTable) => {
+        const subCourtName = $(courtTable).find('.courtTag').text().trim().replace(/\s+/g, ' '); // 예: "1 코트"
+        
+        $(courtTable).find('.resTag').each((slotIdx, resTag) => {
+          const input = $(resTag).find('input[type="checkbox"]').first();
+          
+          // 체크박스가 있고, disabled가 아니면 해당 세부 코트 예약 가능
+          if (input.length > 0 && !input.attr('disabled')) {
+            results.push({
+              court_id: court.id,
+              date: date,
+              time_slot: STANDARD_SLOTS[slotIdx],
+              sub_court_name: subCourtName,
+              status: 'AVAILABLE'
+            });
+          }
+        });
+      });
+      
+    } catch (err) {
+      console.error(`[고양 크롤링 에러] ${court.name} (${date}):`, err.message);
+    }
+  }
+  return results;
+}
+
+// --- 3. 기타 지자체 파싱 (용인시, 김포시 등 아직 개발 안된 곳) ---
 async function scrapeOtherRegion(court) {
   const results = [];
   console.log(`[개발 중] ${court.region} - ${court.name} 크롤러는 개발 예정입니다.`);
@@ -114,31 +169,57 @@ async function main() {
     }
 
     let allReservations = [];
+    const courtIdsToUpdate = [];
 
     // 2. 각 코트별로 크롤링 수행
     for (const court of courts) {
       let slots = [];
       if (court.region === '강서구' || court.region === '마포구') {
         slots = await scrapeSeoulYeyak(court);
+      } else if (court.region === '고양시') {
+        slots = await scrapeGoyang(court);
       } else {
         slots = await scrapeOtherRegion(court);
       }
-      allReservations = allReservations.concat(slots);
+      
+      // slots가 null이면 시스템 점검 등 정상 수집이 불가능한 상태이므로 기존 데이터를 지우지 않음
+      if (slots !== null) {
+        allReservations = allReservations.concat(slots);
+        courtIdsToUpdate.push(court.id);
+      }
     }
     
     console.log(`총 ${allReservations.length}개의 빈자리 데이터 취합 완료.`);
     
-    // 3. 기존 예약 상태 초기화 및 업데이트 (과거 데이터 정리)
-    // 실제 운영시에는 오늘 날짜 이전 데이터 삭제 및 전체 업데이트 진행
+    // 3. 기존 예약 상태 초기화 및 업데이트 (과거/취소된 데이터 동기화)
+    const today = getFormattedDate(0);
+    
+    // 정상 수집된 코트(courtIdsToUpdate)의 오늘 이후 기존 예약 데이터를 일단 모두 삭제
+    // (이 과정을 거쳐야 예약 마감된 코트가 DB에서도 사라집니다)
+    if (courtIdsToUpdate.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('reservations_available')
+        .delete()
+        .in('court_id', courtIdsToUpdate)
+        .gte('date', today);
+        
+      if (deleteError) {
+         console.error("기존 데이터 삭제 실패 (동기화 오류 가능성):", deleteError);
+      } else {
+         console.log("기존 데이터 정리 완료 (동기화 준비)");
+      }
+    }
     
     if (allReservations.length > 0) {
-      // Upsert 방식: 기존 데이터 덮어쓰기 (court_id, date, time_slot 기준)
+      // 최신 데이터 삽입 (삭제 후 삽입이므로 실제로는 Insert와 같습니다)
       const { data, error } = await supabase
         .from('reservations_available')
-        .upsert(allReservations, { onConflict: 'court_id, date, time_slot' });
+        .upsert(allReservations, { onConflict: 'court_id, date, time_slot, sub_court_name' });
         
       if (error) throw error;
-      console.log("Supabase 데이터 동기화 완료");
+      console.log("Supabase 최신 데이터 동기화 완료");
+    } else {
+      console.log("새로 삽입할 예약 가능 슬롯이 없습니다 (전체 마감 또는 예약 불가 시간).");
     }
 
   } catch (err) {

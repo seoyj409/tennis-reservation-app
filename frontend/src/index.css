@@ -434,3 +434,135 @@ body {
     justify-content: space-between;
   }
 }
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-content {
+  background: white;
+  width: 100%;
+  max-width: 500px;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  animation: modalScaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalScaleUp {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--color-border-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.modal-info {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-bottom: 20px;
+  background: var(--color-bg-body);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  display: inline-block;
+}
+
+.sub-court-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sub-court-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: white;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  transition: all 0.2s;
+}
+
+.sub-court-item:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.sc-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.sc-status.available {
+  font-size: 13px;
+  color: var(--color-slot-open-text);
+  font-weight: 500;
+  margin-left: auto;
+  margin-right: 16px;
+}
+
+.booking-btn {
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.booking-btn:hover {
+  background: #1e40af;
+}
+
+/* Responsive refine */
+@media (max-width: 480px) {
+  .app-container {
+    padding: 1.5rem 1rem;
+  }
+  .modal-content {
+    max-width: 100%;
+  }
+  .sub-court-item {
+    padding: 12px;
+  }
+}
