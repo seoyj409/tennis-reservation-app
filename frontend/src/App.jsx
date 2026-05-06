@@ -32,6 +32,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   
   // States
+  const [activeTab, setActiveTab] = useState('고양시');
   const [dates, setDates] = useState([getFormattedDate(0), getFormattedDate(1), getFormattedDate(2)]);
   const [activeDate, setActiveDate] = useState(dates[0].value);
   const [lastSyncTime, setLastSyncTime] = useState(null);
@@ -132,17 +133,12 @@ function App() {
 
   // 렌더링용 필터링 데이터
   const filteredCourts = useMemo(() => {
-    // 고양시 전체 코트를 보여주되 즐겨찾기를 위로 올리거나 그대로 둡니다.
-    // 여기서는 기본 전체 노출을 유지합니다.
-    return courts;
-  }, [courts]);
+    return courts.filter(c => c.region === activeTab);
+  }, [courts, activeTab]);
 
   // 해당 지역 탭에 초록점(예약가능)이 있는지 판별
   const hasOpenSlot = (region) => {
-    let targetCourts = courts;
-    if (region === '즐겨찾기') targetCourts = courts.filter(c => favorites.includes(c.id));
-    else if (region !== '전체') targetCourts = courts.filter(c => c.region === region);
-
+    let targetCourts = courts.filter(c => c.region === region);
     return targetCourts.some(c => {
       const dateSlots = c.slotsByDate[activeDate] || {};
       return Object.keys(dateSlots).length > 0;
@@ -184,6 +180,25 @@ function App() {
             {lastSyncTime && <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>마지막 동기화: {lastSyncTime}</div>}
           </div>
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="region-tabs">
+        {REGIONS.map(r => {
+          const isActive = activeTab === r;
+          const showDot = hasOpenSlot(r);
+          
+          return (
+            <div 
+              key={r} 
+              className={`rtab ${isActive ? 'active' : ''}`}
+              onClick={() => setActiveTab(r)}
+            >
+              {!isActive && showDot && <span className="dot"></span>}
+              {r}
+            </div>
+          );
+        })}
       </div>
 
       {/* Legend */}
