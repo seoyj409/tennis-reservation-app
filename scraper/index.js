@@ -7,7 +7,8 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("Supabase URL and Key must be provided in .env");
+  console.error("❌ 에러: Supabase URL 또는 Key가 설정되지 않았습니다.");
+  console.error("로컬에서는 .env 파일을 확인하시고, GitHub Actions에서는 Settings > Secrets > Actions에 SUPABASE_URL과 SUPABASE_KEY를 등록했는지 확인해주세요.");
   process.exit(1);
 }
 
