@@ -21,6 +21,8 @@ const getFormattedDate = (daysAdd = 0) => {
     return d.toISOString().split('T')[0];
 };
 
+const delay = (ms) => new Promise(res => setTimeout(res, ms));
+
 const STANDARD_SLOTS = [
   "06:00~08:00", "08:00~10:00", "10:00~12:00", "12:00~14:00",
   "14:00~16:00", "16:00~18:00", "18:00~20:00", "20:00~22:00"
@@ -90,7 +92,7 @@ async function scrapeGoyang(court) {
   const results = [];
   console.log(`[실시간 크롤링] 고양시 - ${court.name} (ID: ${siteId})`);
 
-  for (let daysAdd = 0; daysAdd < 3; daysAdd++) {
+  for (let daysAdd = 0; daysAdd < 30; daysAdd++) {
     const date = getFormattedDate(daysAdd);
     const url = `https://www.gytennis.or.kr/daily/${siteId}/${date}`;
     
@@ -110,10 +112,10 @@ async function scrapeGoyang(court) {
         const subCourtName = $(courtTable).find('.courtTag').text().trim().replace(/\s+/g, ' '); // 예: "1 코트"
         
         $(courtTable).find('.resTag').each((slotIdx, resTag) => {
-          const input = $(resTag).find('input[type="checkbox"]').first();
+          const isBooked = $(resTag).find('.fa-user-clock').length > 0;
           
-          // 체크박스가 있고, disabled가 아니면 해당 세부 코트 예약 가능
-          if (input.length > 0 && !input.attr('disabled')) {
+          // 사람 이미지(fa-user-clock)가 없으면 예약 가능
+          if (!isBooked) {
             results.push({
               court_id: court.id,
               date: date,
@@ -128,17 +130,118 @@ async function scrapeGoyang(court) {
     } catch (err) {
       console.error(`[고양 크롤링 에러] ${court.name} (${date}):`, err.message);
     }
+    await delay(300); // 서버 부하 방지를 위한 0.3초 대기
   }
   return results;
 }
 
-// --- 3. 기타 지자체 파싱 (용인시, 김포시 등 아직 개발 안된 곳) ---
+// --- 3. 성저테니스장 파싱 (고양도시관리공사) ---
+async function scrapeSeongjeo(court) {
+  const results = [];
+  console.log(`[실시간 크롤링] 고양시 - ${court.name} (ID: ${court.booking_url_id})`);
+
+  const id = process.env.GYS_USER_ID;
+  const pw = process.env.GYS_USER_PW;
+
+  if (!id || !pw) {
+    console.error("❌ 에러: GYS_USER_ID 또는 GYS_USER_PW 환경 변수가 없습니다.");
+    return null;
+  }
+
+  try {
+    const loginRes = await axios.post('https://daehwa.gys.or.kr:451/member/login_process.php', 
+      new URLSearchParams({id, pw, preURL: '/rent/tennis_condition.php'}).toString(), 
+      {
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        maxRedirects: 0,
+        validateStatus: (status) => status >= 200 && status < 400
+      }
+    );
+    
+    let cookies = [];
+    if (loginRes.headers['set-cookie']) {
+      cookies = loginRes.headers['set-cookie'].map(c => c.split(';')[0]);
+    }
+
+    if (cookies.length === 0) {
+      console.error("❌ 성저테니스장 로그인 실패: 쿠키를 발급받지 못했습니다.");
+      return null;
+    }
+
+    const courtsOpt = [
+      { sub_court_name: '1 코트', place_opt: 2 },
+      { sub_court_name: '2 코트', place_opt: 7 },
+      { sub_court_name: '3 코트', place_opt: 8 },
+      { sub_court_name: '4 코트', place_opt: 9 }
+    ];
+
+    const targetDates = Array.from({length: 30}, (_, i) => getFormattedDate(i));
+    const targetSet = new Set(targetDates);
+    
+    const monthSet = new Set();
+    targetDates.forEach(d => {
+      const parts = d.split('-');
+      monthSet.add(`${parts[0]}-${parts[1]}`);
+    });
+
+    for (const opt of courtsOpt) {
+      for (const yyyymm of monthSet) {
+        const [year, month] = yyyymm.split('-');
+        const url = `https://daehwa.gys.or.kr:451/rent/tennis_condition.php?place_opt=${opt.place_opt}&year=${year}&month=${month}`;
+        
+        const htmlRes = await axios.get(url, {
+          headers: { 'Cookie': cookies.join('; ') }
+        });
+        
+        const $ = cheerio.load(htmlRes.data);
+        
+        $('table.table tbody td').each((i, td) => {
+          const dayText = $(td).find('font').first().text().trim();
+          if (!dayText) return;
+          
+          const dayNum = parseInt(dayText, 10);
+          if (isNaN(dayNum)) return;
+          
+          const dateStr = `${year}-${month}-${String(dayNum).padStart(2, '0')}`;
+          
+          if (targetSet.has(dateStr)) {
+            $(td).find('li a').each((j, a) => {
+              const text = $(a).text();
+              const match = text.match(/(\d{2}:\d{2})/);
+              if (match) {
+                const startTime = match[1];
+                const startHour = parseInt(startTime.split(':')[0], 10);
+                const endHour = startHour + 2;
+                const endTime = `${String(endHour).padStart(2, '0')}:00`;
+                const timeSlot = `${startTime}~${endTime}`;
+                
+                results.push({
+                  court_id: court.id,
+                  date: dateStr,
+                  time_slot: timeSlot,
+                  sub_court_name: opt.sub_court_name,
+                  status: 'AVAILABLE'
+                });
+              }
+            });
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.error(`[성저 크롤링 에러] ${court.name}:`, err.message);
+    return null;
+  }
+  return results;
+}
+
+// --- 4. 기타 지자체 파싱 (용인시, 김포시 등 아직 개발 안된 곳) ---
 async function scrapeOtherRegion(court) {
   const results = [];
   console.log(`[개발 중] ${court.region} - ${court.name} 크롤러는 개발 예정입니다.`);
   
   // 임시 데이터
-  for (let daysAdd = 0; daysAdd < 3; daysAdd++) {
+  for (let daysAdd = 0; daysAdd < 30; daysAdd++) {
     const date = getFormattedDate(daysAdd);
     STANDARD_SLOTS.forEach(slot => {
       if (Math.random() > 0.8) {
@@ -177,7 +280,11 @@ async function main() {
       if (court.region === '강서구' || court.region === '마포구') {
         slots = await scrapeSeoulYeyak(court);
       } else if (court.region === '고양시') {
-        slots = await scrapeGoyang(court);
+        if (court.name === '성저테니스장') {
+          slots = await scrapeSeongjeo(court);
+        } else {
+          slots = await scrapeGoyang(court);
+        }
       } else {
         slots = await scrapeOtherRegion(court);
       }
